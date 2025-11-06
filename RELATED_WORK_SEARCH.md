@@ -72,7 +72,12 @@
 - [ ] GENIE (2024) - If it uses diffusion + discrete codes
 
 ### RVQ Language Models (No Diffusion)
-- [ ] VALL-E (2023) - Uses RVQ codes for speech, but AR not diffusion
+- [x] **VALL-E (2023)** - ✅ ANALYZED - Uses RVQ codes for speech, but AR not diffusion
+  - **Architecture:** EnCodec (8-level RVQ) + AR for C1 + NAR for C2-C8
+  - **Key Insight:** Proves neural codec codes work for language modeling
+  - **Limitation:** AR generation is sequential (slow)
+  - **Opportunity:** Replace AR with diffusion for parallel generation
+  - **See:** VALLE_DEEP_ANALYSIS.md
 - [ ] AudioLM (2022) - RVQ + language model, but AR not diffusion
 - [ ] SpeechGPT - If it uses neural codec
 
@@ -117,7 +122,7 @@ cat:cs.LG AND "code generation" AND "diffusion"
 
 ### Audio Generation with Codecs
 6. ✅ **AudioLM** (Google, 2022) - RVQ + AR (not diffusion)
-7. ✅ **VALL-E** (Microsoft, 2023) - RVQ + AR for speech
+7. ✅ **VALL-E** (Microsoft, 2023) - ✅ **ANALYZED** - RVQ + AR for speech (see VALLE_DEEP_ANALYSIS.md)
 8. ✅ **MusicGen** (Meta, 2023) - Uses Encodec + AR
 
 ### Text Diffusion
@@ -143,19 +148,26 @@ cat:cs.LG AND "code generation" AND "diffusion"
 
 ## Current Assessment
 
-**Novelty Status:** ✅ **STRONG**
+**Novelty Status:** ✅ **VERY STRONG**
 
 **Reasoning:**
-1. No existing work on RVQ + diffusion for CODE
-2. TaDiCodec AVOIDS what we propose (validates gap)
-3. Audio/image work doesn't transfer directly to code
-4. Unique combination of 3 elements
+1. No existing work on RVQ + diffusion for CODE ✅
+2. TaDiCodec AVOIDS what we propose (validates gap) ✅
+3. Audio/image work doesn't transfer directly to code ✅
+4. **VALL-E validates neural codec + LM works, but uses AR not diffusion** ✅
+5. Unique combination of 3 elements: RVQ + Diffusion + Code
+
+**Key Validation from VALL-E:**
+- ✅ Proves neural codec codes work for language modeling
+- ✅ Shows RVQ hierarchy is meaningful (coarse → fine)
+- ✅ Demonstrates in-context learning at scale
+- ❌ BUT: Uses AR (slow), not diffusion (parallel) → **Our opportunity!**
 
 **Recommendation:**
-1. Do the additional keyword searches above
-2. Specifically check for "neural codec language" and related
-3. If nothing found → PROCEED with confidence
-4. Update related work section in paper with proper positioning
+1. ~~Do the additional keyword searches above~~ (Found VALL-E - key validation)
+2. ~~Specifically check for "neural codec language" and related~~ (VALL-E is main example)
+3. **PROCEED with confidence** - VALL-E validates approach, our diffusion is novel
+4. Update related work section: "VALL-E proves codec+LM works, we add diffusion"
 
 ## Related Work Section (Draft)
 
@@ -171,8 +183,18 @@ effective, they operate in the discrete token space, limiting generation speed
 and requiring many denoising steps (100-128).
 
 ### Codecs Meet Language Models
-VALL-E and AudioLM use RVQ codes with autoregressive language models for speech.
-TaDiCodec (2025) integrates diffusion into the codec decoder but explicitly
+**VALL-E** [Wang et al., 2023] pioneered language modeling on neural codec codes,
+achieving zero-shot text-to-speech by autoregressively generating EnCodec RVQ codes.
+VALL-E validates that (1) neural codec codes are effective language modeling targets,
+(2) RVQ hierarchy captures meaningful structure (coarse acoustic properties in early
+quantizers, fine details in later ones), and (3) non-autoregressive modeling of fine
+levels achieves 8x speedup. However, VALL-E's autoregressive generation of coarse
+codes remains sequential and slow.
+
+**AudioLM** [Borsos et al., 2022] uses RVQ codes with autoregressive transformers for
+audio generation, demonstrating high-quality continuation tasks.
+
+**TaDiCodec** [2025] integrates diffusion into the codec decoder but explicitly
 avoids multi-layer RVQ, using single-layer quantization instead.
 
 ### Our Contribution
@@ -180,7 +202,9 @@ We propose the first application of multi-level RVQ + separate diffusion modelin
 for code generation. Unlike TaDiCodec which avoids hierarchical quantization for
 audio, we show that multi-level RVQ naturally captures code's hierarchical
 structure (syntax, semantics, style). Unlike AudioLM/VALL-E which use
-autoregressive models, we use diffusion for non-autoregressive generation.
+autoregressive models, we use diffusion for parallel, non-autoregressive generation
+with iterative refinement. VALL-E validates that codec codes work for language
+modeling; we extend this by replacing AR with diffusion for better speed and quality.
 ```
 
 ## Next Actions
