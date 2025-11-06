@@ -19,21 +19,21 @@ The paper describes **coupled sampling** where:
 
 ```mermaid
 flowchart TD
-    A[Input: batch, prompt_index] --> B[Sample mask_ratio ~ U(0.2, 0.8)]
-    B --> C[Generate random_matrix ~ U(0,1)]
+    A[Input: batch and prompt_index] --> B[Sample mask_ratio from U 0.2 to 0.8]
+    B --> C[Generate random_matrix from U 0 to 1]
     C --> D1[Version 0: Full Mask]
-    C --> D2[Version 1: Partial Mask with ratio t]
-    C --> D3[Version 2: Complementary Mask with ratio 1-t]
+    C --> D2[Version 1: Partial Mask ratio t]
+    C --> D3[Version 2: Complementary Mask ratio 1-t]
 
-    D1 --> E1["mask ALL completion tokens<br/>is_mask = ~prompt_index"]
-    D2 --> E2["mask where random < t<br/>is_mask = ~prompt_index & (random < t)"]
-    D3 --> E3["mask where random > t<br/>is_mask = ~prompt_index & (random > t)"]
+    D1 --> E1[mask ALL completion tokens]
+    D2 --> E2[mask where random less than t]
+    D3 --> E3[mask where random greater than t]
 
-    E1 --> F1["noisy_batch[0]<br/>weight: 1"]
-    E2 --> F2["noisy_batch[1]<br/>weight: 1/t"]
-    E3 --> F3["noisy_batch[2]<br/>weight: 1/(1-t)"]
+    E1 --> F1[noisy_batch 0 with weight 1]
+    E2 --> F2[noisy_batch 1 with weight 1/t]
+    E3 --> F3[noisy_batch 2 with weight 1 over 1-t]
 
-    F1 & F2 & F3 --> G[Return 3 masked versions + weights]
+    F1 & F2 & F3 --> G[Return 3 masked versions plus weights]
 
     style D1 fill:#ffcccc
     style D2 fill:#ccffcc
@@ -53,6 +53,15 @@ flowchart TD
 
 This ensures every token appears unmasked in exactly one of the two versions!
 
+**Code Evidence (lines 272-277)**:
+```python
+# Version 1: mask where random < t_p
+is_mask_v1 = ~prompt_index & (random_matrix < t_p.unsqueeze(1))
+
+# Version 2: mask where random > t_p
+is_mask_v2 = ~prompt_index & (random_matrix > t_p.unsqueeze(1))
+```
+
 ---
 
 ## 2. Probability Computation: selective_log_softmax
@@ -71,22 +80,22 @@ Where:
 
 ```mermaid
 flowchart TD
-    A["Input: logits [num_iters×3×batch, seq_len, vocab]<br/>index [num_iters×batch, seq_len]<br/>weights [num_iters×3]<br/>mask [num_iters×batch, seq_len]"] --> B[Process each sequence i]
+    A[Input: logits weights and mask] --> B[Process each sequence i]
 
     B --> C[Extract 3 versions of logits]
-    C --> D["logits_v0, logits_v1, logits_v2<br/>[3, seq_len, vocab]"]
+    C --> D[logits_v0 v1 v2 for 3 versions]
 
-    D --> E[Compute log_softmax for all 3 versions]
-    E --> F["log_probs_v0, log_probs_v1, log_probs_v2<br/>[3, seq_len]"]
+    D --> E[Compute log_softmax for all 3]
+    E --> F[Get log_probs for v0 v1 v2]
 
     F --> G{For each token k}
-    G -->|mask[k]==True| H["Use v1:<br/>weighted_logp = v1 × weight[1]"]
-    G -->|mask[k]==False| I["Use v2:<br/>weighted_logp = v2 × weight[2]"]
+    G -->|mask true| H[Use v1 weighted by weight 1]
+    G -->|mask false| I[Use v2 weighted by weight 2]
 
-    H & I --> J["Combine:<br/>final = (v0 + weighted_logp) / 2"]
+    H & I --> J[Combine: v0 plus weighted divided by 2]
 
     J --> K[Stack all sequences]
-    K --> L["Output: per_token_logps<br/>[num_iters×batch, seq_len]"]
+    K --> L[Output per_token_logps]
 
     style G fill:#ffffcc
     style J fill:#ccffcc
@@ -100,7 +109,7 @@ final_logps[k] = (log p0[k] + weighted_logp[k]) / 2
 ```
 
 Where:
-```
+```python
 weighted_logp[k] = {
     log p1[k] × (1/t)     if mask[k] == True  (token k masked in v1)
     log p2[k] × (1/(1-t)) if mask[k] == False (token k masked in v2)
@@ -119,23 +128,23 @@ weighted_logp[k] = {
 ```mermaid
 flowchart TD
     START([Start GRPO Training]) --> A[Sample condition c from dataset]
-    A --> B[Generate G completions o1...oG at temp=1.2]
+    A --> B[Generate G completions at temp 1.2]
 
-    B --> C[Execute code & compute rewards r1...rG]
-    C --> D["Compute advantages:<br/>Ai = ri - mean(r) or LOO"]
+    B --> C[Execute code and compute rewards]
+    C --> D[Compute advantages from rewards]
 
-    D --> E[Sample λ timestep pairs<br/>where t + t̂ = T]
-    E --> F["For each completion oi:"]
+    D --> E[Sample lambda timestep pairs]
+    E --> F[For each completion]
 
-    F --> G[Create 3 masked versions<br/>using forward_process]
-    G --> H[Forward pass model<br/>get logits for all 3 versions]
-    H --> I[Compute per-token log probs<br/>using selective_log_softmax]
+    F --> G[Create 3 masked versions]
+    G --> H[Forward pass model for all 3]
+    H --> I[Compute per-token log probs]
 
-    I --> J["For iteration j=1...μ:"]
-    J --> K[Compute importance ratio ρ<br/>πθ / πold]
-    K --> L["Compute GRPO loss:<br/>min(ρA, clip(ρ)A) - β·KL"]
+    I --> J[For iteration j equals 1 to mu]
+    J --> K[Compute importance ratio rho]
+    K --> L[Compute GRPO loss with clipping]
 
-    L --> M[Backpropagate & update θ]
+    L --> M[Backpropagate and update theta]
     M --> N{More iterations?}
     N -->|Yes| J
     N -->|No| O{Converged?}
@@ -159,30 +168,30 @@ sequenceDiagram
     participant SLS as selective_log_softmax
 
     T->>T: Sample mask_seed for iteration
-    T->>FP: forward_process(completion, seed)
+    T->>FP: Call forward_process with completion
 
-    FP->>FP: Sample t ~ U(0.2, 0.8)
+    FP->>FP: Sample t from U 0.2 to 0.8
     FP->>FP: Generate random_matrix
 
-    FP->>FP: Create v0: all tokens masked
-    FP->>FP: Create v1: random < t masked
-    FP->>FP: Create v2: random > t masked
+    FP->>FP: Create v0 all tokens masked
+    FP->>FP: Create v1 random less than t masked
+    FP->>FP: Create v2 random greater than t masked
 
-    FP-->>T: Return [v0, v1, v2] + weights [1, 1/t, 1/(1-t)]
+    FP-->>T: Return v0 v1 v2 plus weights
 
-    T->>M: Forward pass v0, v1, v2
+    T->>M: Forward pass v0 v1 v2
     M-->>T: Return logits for all 3 versions
 
-    T->>SLS: selective_log_softmax(logits, targets, weights, mask)
+    T->>SLS: Call selective_log_softmax
 
-    SLS->>SLS: For each token k:
-    Note over SLS: If k masked in v1: use log_p1[k] × (1/t)
-    Note over SLS: If k masked in v2: use log_p2[k] × (1/(1-t))
-    SLS->>SLS: Combine: (log_p0[k] + weighted) / 2
+    SLS->>SLS: For each token k decide version
+    Note over SLS: If k masked in v1 use log_p1
+    Note over SLS: If k masked in v2 use log_p2
+    SLS->>SLS: Combine with v0 and average
 
     SLS-->>T: Return final per-token log probs
 
-    T->>T: Compute ρ = exp(log_π_new - log_π_old)
+    T->>T: Compute rho equals exp log_pi_new minus log_pi_old
     T->>T: Compute GRPO loss
 ```
 
@@ -227,7 +236,43 @@ Where v_k² > 0 is the expected score squared. This guarantees variance reductio
 
 ---
 
-## 6. Comparison: Code vs Paper
+## 6. Coupled Mask Generation Diagram
+
+```mermaid
+flowchart TB
+    A[Completion Tokens x1 to xN] --> D0
+    B[Sample t from U 0.2 to 0.8] --> D0
+    C[Random Matrix r1 to rN] --> D0
+
+    D0[Version 0 All tokens to MASK]
+    D1[Version 1 Partial Mask ratio t]
+    D2[Version 2 Complementary ratio 1-t]
+
+    A & B & C --> D1
+    A & B & C --> D2
+
+    D0 --> G[Forward Pass Model]
+    D1 --> G
+    D2 --> G
+
+    G --> H[Logits v0 v1 v2]
+    H --> I[selective_log_softmax]
+    I --> J[Per-token log prob averaged]
+
+    style D0 fill:#ffcccc
+    style D1 fill:#ccffcc
+    style D2 fill:#ccccff
+    style J fill:#ffffcc
+```
+
+**Key Property**: For each token i:
+- If `ri < t`: token i masked in v1, kept in v2
+- If `ri > t`: token i masked in v2, kept in v1
+- Result: Every token evaluated exactly once!
+
+---
+
+## 7. Comparison: Code vs Paper
 
 | Aspect | Paper Description | Code Implementation | Status |
 |--------|------------------|---------------------|---------|
@@ -240,9 +285,9 @@ Where v_k² > 0 is the expected score squared. This guarantees variance reductio
 
 ---
 
-## 7. Critical Findings
+## 8. Critical Findings
 
-### 7.1 ✓ Implementation is Faithful to Paper
+### 8.1 ✓ Implementation is Faithful to Paper
 
 The code correctly implements the coupled-GRPO algorithm as described in the paper. The key innovations are:
 
@@ -251,13 +296,13 @@ The code correctly implements the coupled-GRPO algorithm as described in the pap
 3. **Weighted averaging**: Compensates for variable mask ratios
 4. **Temperature 1.2**: Increases diversity in rollouts (Section 4.3)
 
-### 7.2 Subtle Implementation Choices
+### 8.2 Subtle Implementation Choices
 
 1. **Mask ratio range**: `U(0.2, 0.8)` not `U(0, 1)` → avoids extreme loss values (Appendix B.1)
 2. **Accumulation across iterations**: When `num_iterations > 1`, same `random_matrix` is reused (line 264)
 3. **Full mask always included**: Version 0 provides consistent baseline
 
-### 7.3 Efficiency Analysis
+### 8.3 Efficiency Analysis
 
 For batch size B, sequence length L, with λ=1:
 - **Forward passes**: 3 (one for each version)
@@ -270,53 +315,6 @@ Compare to baseline (full mask only):
 - **Coverage**: All tokens evaluated under same (pessimistic) condition
 
 **Trade-off**: 3× compute for lower variance + better coverage!
-
----
-
-## 8. Mermaid Diagram: Coupled Mask Generation
-
-```mermaid
-graph TB
-    subgraph "Input"
-        A[Completion Tokens:<br/>x1, x2, ..., xN]
-        B[Sample t ~ U(0.2, 0.8)]
-        C[Random Matrix:<br/>r1, r2, ..., rN]
-    end
-
-    subgraph "Version 0: Full Mask"
-        D0[All tokens → MASK]
-        W0[Weight: 1.0]
-    end
-
-    subgraph "Version 1: Partial Mask (ratio t)"
-        D1{For each token i}
-        D1 -->|ri < t| E1[Token i → MASK]
-        D1 -->|ri >= t| F1[Token i → KEEP]
-        W1[Weight: 1/t]
-    end
-
-    subgraph "Version 2: Complementary (ratio 1-t)"
-        D2{For each token i}
-        D2 -->|ri > t| E2[Token i → MASK]
-        D2 -->|ri <= t| F2[Token i → KEEP]
-        W2[Weight: 1/(1-t)]
-    end
-
-    A & B & C --> D0 & D1 & D2
-
-    D0 & W0 --> G[Forward Pass Model]
-    D1 & W1 --> G
-    D2 & W2 --> G
-
-    G --> H[Logits v0, v1, v2]
-    H --> I[selective_log_softmax]
-    I --> J["Per-token log prob:<br/>(p0 + weighted_avg(p1,p2)) / 2"]
-
-    style D0 fill:#ffcccc
-    style D1 fill:#ccffcc
-    style D2 fill:#ccccff
-    style J fill:#ffffcc
-```
 
 ---
 
@@ -380,7 +378,7 @@ The implementation matches the paper's theoretical descriptions, with careful at
 
 | Paper Eq. | Code Location | Verification |
 |-----------|---------------|--------------|
-| Eq. 1 (Diffusion Loss) | Line 1 in Appendix | ✓ Standard masked diffusion |
+| Eq. 1 (Diffusion Loss) | Appendix A.1 | ✓ Standard masked diffusion |
 | Eq. 2 (Policy Gradient) | Lines 182-252 | ✓ GRPO with clipping |
 | Eq. 3 (GRPO Objective) | Lines 215-222 | ✓ PPO-style loss |
 | Eq. 4 (Coupled Probability) | Lines 351-356 | ✓ Averaging with weights |
@@ -388,6 +386,37 @@ The implementation matches the paper's theoretical descriptions, with careful at
 
 ---
 
-*Document generated: 2025-01-XX*
+## Code Location References
+
+### Key Functions
+
+1. **forward_process** (lines 254-279)
+   - Creates 3 masked versions
+   - Returns complementary masks with weights
+
+2. **selective_log_softmax** (lines 59-131)
+   - Computes weighted probabilities
+   - Combines v0, v1, v2 intelligently
+
+3. **_get_per_token_logps** (lines 290-362)
+   - Orchestrates the full probability computation
+   - Handles multiple iterations with mask seeds
+
+4. **compute_loss** (lines 182-252)
+   - Implements GRPO loss with PPO clipping
+   - Uses computed probabilities for importance sampling
+
+### Configuration Parameters
+
+From `configs.py`:
+- `random_masking`: bool (default True) - Use random seeds for different iterations
+- `diffusion_steps`: int (default 128) - Number of denoising steps during generation
+- `generation_temperature`: float (default 1.2) - Sampling temperature for rollouts
+- `generation_batch_size`: int (default 10) - Batch size during generation
+
+---
+
+*Document generated: 2025-01-06*
 *Code version: DiffuCoder open-source release*
 *Paper: "DiffuCoder: Understanding and Improving Masked Diffusion Models for Code Generation"*
+*GitHub: https://github.com/apple/ml-diffucoder*
